@@ -4,9 +4,17 @@ project(ward CXX)
 
 # Main library
 
+set(WARD_SOURCES
+    src/Ward.h
+    src/Ward.cpp
+)
+
+if(WIN32)
+    LIST(APPEND WARD_SOURCES src/Win32.cpp)
+endif()
+
 add_library(ward
-    src/ward.h
-    src/ward.cpp
+    ${WARD_SOURCES}
 )
 
 # Test app
