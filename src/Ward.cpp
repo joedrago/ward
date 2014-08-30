@@ -49,12 +49,12 @@ public:
             {
                 if(walker.isDirectory())
                 {
-                    // WARD_PRINTF("Queueing: %s\n", walker.currentPath().c_str());
+                    WARD_PRINTF("Queueing: %s\n", walker.currentPath().c_str());
                     searchQueue.push(walker.currentPath());
                 }
                 else
                 {
-                    // WARD_PRINTF("* Found file: %s\n", walker.currentPath().c_str());
+                    WARD_PRINTF("* Found file: %s\n", walker.currentPath().c_str());
                     fileCount++;
                 }
             }

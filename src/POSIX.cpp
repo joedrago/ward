@@ -1,37 +1,40 @@
 #include "Ward.h"
 
-#include <windows.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 // --------------------------------------------------------------------------------------
 // WardMutex
 
 struct WardMutexInternal
 {
-    HANDLE handle_;
+    pthread_mutex_t mutex_;
 };
 
 WardMutex::WardMutex()
 {
     internal_ = new WardMutexInternal;
-    internal_->handle_ = CreateMutex(NULL, FALSE, NULL);
+    pthread_mutex_init(&internal_->mutex_, NULL);
 }
 
 WardMutex::~WardMutex()
 {
-    CloseHandle(internal_->handle_);
+    pthread_mutex_destroy(&internal_->mutex_);
     delete internal_;
     internal_ = NULL;
 }
 
 void WardMutex::lock()
 {
-    DWORD ret = WaitForSingleObject(internal_->handle_, INFINITE);
-    WARD_ASSERT(ret == WAIT_OBJECT_0);
+    pthread_mutex_lock(&internal_->mutex_);
 }
 
 void WardMutex::unlock()
 {
-    ReleaseMutex(internal_->handle_);
+    pthread_mutex_unlock(&internal_->mutex_);
 }
 
 // --------------------------------------------------------------------------------------
@@ -39,14 +42,14 @@ void WardMutex::unlock()
 
 struct WardThreadInternal
 {
-    HANDLE handle_;
+    pthread_t thread_;
 };
 
 WardThread::WardThread()
 : stopRequested_(0)
 {
     internal_ = new WardThreadInternal;
-    internal_->handle_ = INVALID_HANDLE_VALUE;
+    internal_->thread_ = NULL;
 }
 
 WardThread::~WardThread()
@@ -58,19 +61,19 @@ WardThread::~WardThread()
     internal_ = NULL;
 }
 
-static DWORD wardThreadFunc(void *rawWardThread)
+static void *wardThreadFunc(void *rawWardThread)
 {
     WardThread *wardThread = (WardThread *)rawWardThread;
-    int ret = wardThread->run();
+    wardThread->run();
     wardThread->setComplete();
     WARD_PRINTF("thread complete.\n");
-    return ret;
+    pthread_exit(NULL);
+    return 0;
 }
 
 void WardThread::start()
 {
-    DWORD id;
-    internal_->handle_ = CreateThread(NULL, 0, wardThreadFunc, (void *)this, 0, &id);
+    pthread_create(&internal_->thread_, NULL, wardThreadFunc, (void *)this);
 }
 
 void WardThread::stop()
@@ -80,22 +83,22 @@ void WardThread::stop()
 
 void WardThread::wait()
 {
-    if(internal_->handle_ != INVALID_HANDLE_VALUE)
+    if(internal_->thread_ != NULL)
     {
-        WaitForSingleObject(internal_->handle_, INFINITE);
-        CloseHandle(internal_->handle_);
-        internal_->handle_ = INVALID_HANDLE_VALUE;
+        pthread_join(internal_->thread_, NULL);
+        internal_->thread_ = NULL;
     }
 }
 
 unsigned int WardThread::now()
 {
-    return GetTickCount();
+    // return GetTickCount();
+    return 0;
 }
 
 void WardThread::sleep(int ms)
 {
-    Sleep(ms);
+    usleep(ms * 1000);
 }
 
 // --------------------------------------------------------------------------------------
@@ -103,8 +106,7 @@ void WardThread::sleep(int ms)
 
 struct WardPathWalkerInternal
 {
-    HANDLE handle_;
-    WIN32_FIND_DATA wfd_;
+    DIR *dir_;
 };
 
 WardPathWalker::WardPathWalker(const std::string &walkPath)
@@ -112,7 +114,7 @@ WardPathWalker::WardPathWalker(const std::string &walkPath)
 , isDirectory_(false)
 {
     internal_ = new WardPathWalkerInternal;
-    internal_->handle_ = INVALID_HANDLE_VALUE;
+    internal_->dir_ = NULL;
 }
 
 WardPathWalker::~WardPathWalker()
@@ -135,12 +137,12 @@ std::string & WardPathWalker::cleanup(std::string &path)
     char prev = 0;
     for(; *src; ++src)
     {
-        if(*src == '/')
+        if(*src == '\\')
         {
-            *src = '\\';
+            *src = '/';
         }
 
-        if((*src != '\\') || (prev != '\\'))
+        if((*src != '/') || (prev != '/'))
         {
             *dst = *src;
             ++dst;
@@ -156,16 +158,14 @@ std::string & WardPathWalker::cleanup(std::string &path)
 bool WardPathWalker::begin()
 {
     end();
-    std::string wildcard = walkPath_ + "\\\\\\*.*";
-    cleanup(wildcard);
 
-    internal_->handle_ = FindFirstFile(wildcard.c_str(), &internal_->wfd_);
-    return (internal_->handle_ != INVALID_HANDLE_VALUE);
+    internal_->dir_ = opendir(walkPath_.c_str());
+    return (internal_->dir_ != NULL);
 }
 
 bool WardPathWalker::next()
 {
-    if(internal_->handle_ == INVALID_HANDLE_VALUE)
+    if(internal_->dir_ == NULL)
     {
         return false;
     }
@@ -173,17 +173,22 @@ bool WardPathWalker::next()
     bool foundAnotherPath = false;
     for(;;)
     {
-        foundAnotherPath = FindNextFile(internal_->handle_, &internal_->wfd_) != 0;
+        struct dirent *dp = readdir(internal_->dir_);
+        foundAnotherPath = (dp != NULL);
         if(foundAnotherPath)
         {
-            if((!strcmp(internal_->wfd_.cFileName, ".")) || (!strcmp(internal_->wfd_.cFileName, "..")))
+            const char *name = dp->d_name;
+            if((!strcmp(name, ".")) || (!strcmp(name, "..")))
             {
                 continue;
             }
 
-            isDirectory_ = (internal_->wfd_.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            currentPath_ = walkPath_ + "\\" + internal_->wfd_.cFileName;
+            currentPath_ = walkPath_ + "/" + name;
             cleanup(currentPath_);
+
+            struct stat st;
+            lstat(currentPath_.c_str(), &st);
+            isDirectory_ = (S_ISDIR(st.st_mode) != 0);
         }
         break;
     }
@@ -193,10 +198,10 @@ bool WardPathWalker::next()
 
 void WardPathWalker::end()
 {
-    if(internal_->handle_ != INVALID_HANDLE_VALUE)
+    if(internal_->dir_ != NULL)
     {
-        FindClose(internal_->handle_);
-        internal_->handle_ = INVALID_HANDLE_VALUE;
+        closedir(internal_->dir_);
+        internal_->dir_ = NULL;
     }
     currentPath_.clear();
 }

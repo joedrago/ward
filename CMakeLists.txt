@@ -11,6 +11,9 @@ set(WARD_SOURCES
 
 if(WIN32)
     LIST(APPEND WARD_SOURCES src/Win32.cpp)
+else()
+    LIST(APPEND WARD_SOURCES src/POSIX.cpp)
+    add_definitions(-D_DEBUG=1)
 endif()
 
 add_library(ward
