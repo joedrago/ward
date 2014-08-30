@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <dirent.h>
 
 // --------------------------------------------------------------------------------------
@@ -92,8 +93,9 @@ void WardThread::wait()
 
 unsigned int WardThread::now()
 {
-    // return GetTickCount();
-    return 0;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
 }
 
 void WardThread::sleep(int ms)

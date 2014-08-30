@@ -3,7 +3,7 @@
 int main(int argc, char *argv[])
 {
     Ward *ward = new Ward;
-    ward->addSearchPath("/Users/jdrago/work/ward");
+    ward->addSearchPath("/Users/jdrago/work");
     ward->start();
     while(1)
     {
